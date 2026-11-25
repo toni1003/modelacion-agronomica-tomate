@@ -23,12 +23,3 @@ $$\text{Rendimiento (t/ha)} = -348.67 + 146.77(\text{pH}) - 7.44(\text{CE}) - 11
 
 # Superficie de Respuesta
 ![Superficie de Respuesta Rendimiento Tomate](superficie_respuesta_tomate.png)
-
-# Requisitos y Ejecución
-1. Clonar el repositorio y asegurarse de tener los archivos en la misma carpeta:
-   * `modelo_rendimiento_tomate.py`
-   * `Datos_Agronomicos_Tomate.xlsx`
-2. Instalar dependencias:
-   ```bash
-   pip install pandas numpy scikit-learn matplotlib openpyxl
-python modelo_rendimiento_tomate.py
