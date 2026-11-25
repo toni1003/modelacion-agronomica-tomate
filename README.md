@@ -1,25 +1,15 @@
-# Predicción de Rendimiento en Tomate (*Solanum lycopersicum*) bajo Estrés Salino y Variaciones de pH
+# Modelo 2: Predicción de Biomasa Aérea (`g/planta`)
+De forma independiente, se modeló la acumulación de biomasa aérea seca por planta a partir de las mismas condiciones edáficas (`pH` y `Salinidad`), evitando cualquier fuga de datos entre variables de cosecha:
 
-Modelo de aprendizaje automático en Python para predecir el rendimiento comercial (`t/ha`) del cultivo de tomate a partir de parámetros químicos del suelo (`pH` y `Salinidad`), evaluando el impacto del estrés osmótico y la acidez/alcalinidad en la respuesta productiva.
-
-# Descripción del Dataset
-El conjunto de datos (`Datos_Agronomicos_Tomate.xlsx`) contiene **60 observaciones** con 4 variables agronómicas:
-* **Variables predictoras ($X$):** `pH` del suelo (rango óptimo ~6.0–6.8) y `Salinidad` medida como conductividad eléctrica (`dS/m`, umbral crítico ~2.5 dS/m).
-* **Variable objetivo ($Y$):** `Rendimiento` comercial de fruto fresco (`t/ha`).
-* **Variable complementaria:** `Biomasa` aérea seca (`g/planta`), excluida como entrada directa en la predicción pre-cosecha para evitar fuga de datos (*data leakage*).
-
-# Comparación de Modelos (Validación Cruzada 5-Fold)
-Se evaluaron tres enfoques de regresión mediante validación cruzada (`KFold = 5`):
-
-| Modelo | $R^2$ Promedio | RMSE (t/ha) | MAE (t/ha) |
+| Modelo | $R^2$ Promedio | RMSE (g/planta) | MAE (g/planta) |
 | :--- | :---: | :---: | :---: |
-| Regresión Lineal Múltiple | 0.599 | 11.25 | 8.84 |
-| **Regresión Polinómica (Grado 2)** | **0.800** | **7.99** | **6.69** |
-| Random Forest Regressor | 0.666 | 10.36 | 8.13 |
+| Regresión Lineal Múltiple | 0.654 | 43.83 | 34.85 |
+| **Regresión Polinómica (Grado 2)** | **0.840** | **30.15** | **24.52** |
+| Random Forest Regressor | 0.750 | 37.34 | 29.57 |
 
-La **Regresión Polinómica de Grado 2** obtuvo el mejor desempeño ($R^2 = 0.80$) al capturar adecuadamente la curva óptima cuadrática del pH y la caída progresiva del rendimiento por salinidad:
+La **Regresión Polinómica de Grado 2** alcanzó el mayor poder predictivo ($R^2 = 0.84$), reflejando el impacto directo del estrés osmótico y la disponibilidad de nutrientes en el crecimiento vegetativo:
 
-$$\text{Rendimiento (t/ha)} = -348.67 + 146.77(\text{pH}) - 7.44(\text{CE}) - 11.59(\text{pH}^2) + 1.16(\text{pH} \cdot \text{CE}) - 0.98(\text{CE}^2)$$
+$$\text{Biomasa (g/planta)} = -1505.21 + 636.38(\text{pH}) - 12.54(\text{CE}) - 49.50(\text{pH}^2) + 1.17(\text{pH} \cdot \text{CE}) - 3.65(\text{CE}^2)$$
 
-# Superficie de Respuesta
-![Superficie de Respuesta Rendimiento Tomate](superficie_respuesta_tomate.png)
+# Superficie de Respuesta (Biomasa)
+![Superficie de Respuesta Biomasa Tomate](superficie_respuesta_biomasa.png)
