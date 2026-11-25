@@ -13,13 +13,10 @@ from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 ARCHIVO_DATOS = "Datos_Agronomicos_Tomate.xlsx"
 df = pd.read_excel(ARCHIVO_DATOS, sheet_name="Datos_Tomate")
 
-# Variables predictoras edáficas (evitando fuga de datos con Biomasa)
 X = df[["pH", "Salinidad (dS/m)"]]
-y = df["Rendimiento (t/ha)"]
+y_rend = df["Rendimiento (t/ha)"]
+y_biom = df["Biomasa (g/planta)"]
 
-# ==============================================================================
-# 2. DEFINICIÓN DE MODELOS Y VALIDACIÓN CRUZADA (5-FOLD)
-# ==============================================================================
 modelos = {
     "Regresión Lineal": LinearRegression(),
     "Regresión Polinómica (Grado 2)": make_pipeline(
@@ -31,113 +28,118 @@ modelos = {
 }
 
 kf = KFold(n_splits=5, shuffle=True, random_state=42)
-resultados = []
 
-for nombre, modelo in modelos.items():
-  scores = cross_validate(
-      modelo,
-      X,
-      y,
-      cv=kf,
-      scoring=("r2", "neg_root_mean_squared_error", "neg_mean_absolute_error"),
+
+def evaluar_y_graficar(y_target, nombre_var, unidad, cmap_color, archivo_salida):
+  resultados = []
+  for nombre, modelo in modelos.items():
+    scores = cross_validate(
+        modelo,
+        X,
+        y_target,
+        cv=kf,
+        scoring=("r2", "neg_root_mean_squared_error", "neg_mean_absolute_error"),
+    )
+    resultados.append({
+        "Modelo": nombre,
+        "R2_CV": round(scores["test_r2"].mean(), 3),
+        f"RMSE_CV ({unidad})": round(
+            -scores["test_neg_root_mean_squared_error"].mean(), 2
+        ),
+        f"MAE_CV ({unidad})": round(
+            -scores["test_neg_mean_absolute_error"].mean(), 2
+        ),
+    })
+
+  df_res = pd.DataFrame(resultados)
+  print(f"\n=== COMPARACIÓN DE MODELOS: {nombre_var.upper()} (5-FOLD CV) ===")
+  print(df_res.to_string(index=False))
+
+  # Entrenar mejor modelo (Polinómico Grado 2)
+  mejor_modelo = modelos["Regresión Polinómica (Grado 2)"]
+  mejor_modelo.fit(X, y_target)
+
+  # Ecuación interpretable en escala original
+  poly_raw = make_pipeline(
+      PolynomialFeatures(degree=2, include_bias=False), LinearRegression()
   )
-  resultados.append({
-      "Modelo": nombre,
-      "R2_CV": round(scores["test_r2"].mean(), 3),
-      "RMSE_CV (t/ha)": round(
-          -scores["test_neg_root_mean_squared_error"].mean(), 2
-      ),
-      "MAE_CV (t/ha)": round(
-          -scores["test_neg_mean_absolute_error"].mean(), 2
-      ),
-  })
+  poly_raw.fit(X, y_target)
+  vars_out = poly_raw.named_steps[
+      "polynomialfeatures"
+  ].get_feature_names_out()
+  coefs = poly_raw.named_steps["linearregression"].coef_
+  intercepto = poly_raw.named_steps["linearregression"].intercept_
 
-df_resultados = pd.DataFrame(resultados)
-print("=== COMPARACIÓN DE MODELOS (VALIDACIÓN CRUZADA 5-FOLD) ===")
-print(df_resultados.to_string(index=False))
+  print(f"\n=== ECUACIÓN AGRONÓMICA: {nombre_var.upper()} ===")
+  print(f"{nombre_var} ({unidad}) = {intercepto:.2f}", end="")
+  for v, c in zip(vars_out, coefs):
+    signo = "+" if c >= 0 else "-"
+    print(f" {signo} {abs(c):.2f}*({v})", end="")
+  print("\n")
+
+  # Gráficos: Superficie de respuesta + Real vs Predicho
+  fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+
+  ph_grid = np.linspace(df["pH"].min(), df["pH"].max(), 50)
+  sal_grid = np.linspace(
+      df["Salinidad (dS/m)"].min(), df["Salinidad (dS/m)"].max(), 50
+  )
+  PH, SAL = np.meshgrid(ph_grid, sal_grid)
+  grid_df = pd.DataFrame({"pH": PH.ravel(), "Salinidad (dS/m)": SAL.ravel()})
+  Z = mejor_modelo.predict(grid_df).reshape(PH.shape)
+
+  contour = axes[0].contourf(PH, SAL, Z, levels=15, cmap=cmap_color)
+  plt.colorbar(contour, ax=axes[0], label=f"{nombre_var} Predicha ({unidad})")
+  axes[0].scatter(
+      df["pH"],
+      df["Salinidad (dS/m)"],
+      c="black",
+      edgecolors="white",
+      s=40,
+      alpha=0.8,
+      label="Observaciones (n=60)",
+  )
+  axes[0].set_title(f"Superficie de Respuesta: {nombre_var} vs pH y Salinidad")
+  axes[0].set_xlabel("pH del suelo")
+  axes[0].set_ylabel("Salinidad (dS/m)")
+  axes[0].legend()
+
+  y_pred = mejor_modelo.predict(X)
+  r2_cv = df_res.loc[
+      df_res["Modelo"] == "Regresión Polinómica (Grado 2)", "R2_CV"
+  ].values[0]
+  color_puntos = "#2b5c8f" if nombre_var == "Rendimiento" else "#2e7d32"
+  axes[1].scatter(y_target, y_pred, color=color_puntos, alpha=0.8, edgecolors="k")
+  axes[1].plot(
+      [y_target.min(), y_target.max()],
+      [y_target.min(), y_target.max()],
+      "r--",
+      lw=2,
+      label="Ajuste ideal (1:1)",
+  )
+  axes[1].set_title(f"{nombre_var} Real vs. Predicha (R² CV = {r2_cv})")
+  axes[1].set_xlabel(f"{nombre_var} Real ({unidad})")
+  axes[1].set_ylabel(f"{nombre_var} Predicha ({unidad})")
+  axes[1].legend()
+
+  plt.tight_layout()
+  plt.savefig(archivo_salida, dpi=150)
+  plt.close()
+
+  # Predicción para escenario óptimo de ejemplo
+  nuevo_suelo = pd.DataFrame({"pH": [6.4], "Salinidad (dS/m)": [1.8]})
+  pred = mejor_modelo.predict(nuevo_suelo)[0]
+  print(
+      f"Predicción {nombre_var} (pH 6.4, CE 1.8 dS/m): {pred:.2f} {unidad}"
+  )
+
 
 # ==============================================================================
-# 3. ENTRENAMIENTO DEL MEJOR MODELO Y SUPERFICIE DE RESPUESTA
+# 2. EJECUCIÓN PARA AMBAS VARIABLES OBJETIVO POR SEPARADO
 # ==============================================================================
-mejor_modelo = modelos["Regresión Polinómica (Grado 2)"]
-mejor_modelo.fit(X, y)
-
-# Ecuación polinómica interpretable (en escala original)
-poly_interpretable = make_pipeline(
-    PolynomialFeatures(degree=2, include_bias=False), LinearRegression()
+evaluar_y_graficar(
+    y_rend, "Rendimiento", "t/ha", "YlGnBu", "superficie_respuesta_tomate.png"
 )
-poly_interpretable.fit(X, y)
-nombres_vars = poly_interpretable.named_steps[
-    "polynomialfeatures"
-].get_feature_names_out()
-coefs = poly_interpretable.named_steps["linearregression"].coef_
-intercepto = poly_interpretable.named_steps["linearregression"].intercept_
-
-print("\n=== ECUACIÓN AGRONÓMICA AJUSTADA ===")
-print(f"Rendimiento (t/ha) = {intercepto:.2f}", end="")
-for var, c in zip(nombres_vars, coefs):
-  signo = "+" if c >= 0 else "-"
-  print(f" {signo} {abs(c):.2f}*({var})", end="")
-print("\n")
-
-# ==============================================================================
-# 4. VISUALIZACIÓN PARA EL REPOSITORIO
-# ==============================================================================
-fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-
-# Panel 1: Superficie de respuesta (pH vs Salinidad)
-ph_grid = np.linspace(df["pH"].min(), df["pH"].max(), 50)
-sal_grid = np.linspace(
-    df["Salinidad (dS/m)"].min(), df["Salinidad (dS/m)"].max(), 50
-)
-PH, SAL = np.meshgrid(ph_grid, sal_grid)
-grid_df = pd.DataFrame({"pH": PH.ravel(), "Salinidad (dS/m)": SAL.ravel()})
-Z = mejor_modelo.predict(grid_df).reshape(PH.shape)
-
-contour = axes[0].contourf(PH, SAL, Z, levels=15, cmap="YlGnBu")
-plt.colorbar(contour, ax=axes[0], label="Rendimiento Predicho (t/ha)")
-axes[0].scatter(
-    df["pH"],
-    df["Salinidad (dS/m)"],
-    c="black",
-    edgecolors="white",
-    s=40,
-    alpha=0.8,
-    label="Observaciones (n=60)",
-)
-axes[0].set_title("Superficie de Respuesta: Rendimiento vs pH y Salinidad")
-axes[0].set_xlabel("pH del suelo")
-axes[0].set_ylabel("Salinidad (dS/m)")
-axes[0].legend()
-
-# Panel 2: Valores Reales vs Predichos
-y_pred = mejor_modelo.predict(X)
-r2_cv = df_resultados.loc[
-    df_resultados["Modelo"] == "Regresión Polinómica (Grado 2)", "R2_CV"
-].values[0]
-axes[1].scatter(y, y_pred, color="#2b5c8f", alpha=0.8, edgecolors="k")
-axes[1].plot(
-    [y.min(), y.max()],
-    [y.min(), y.max()],
-    "r--",
-    lw=2,
-    label="Ajuste ideal (1:1)",
-)
-axes[1].set_title(f"Rendimiento Real vs. Predicho (R² CV = {r2_cv})")
-axes[1].set_xlabel("Rendimiento Real (t/ha)")
-axes[1].set_ylabel("Rendimiento Predicho (t/ha)")
-axes[1].legend()
-
-plt.tight_layout()
-plt.savefig("superficie_respuesta_tomate.png", dpi=150)
-plt.show()
-
-# ==============================================================================
-# 5. PREDICCIÓN PARA UN NUEVO ESCENARIO DE SUELO
-# ==============================================================================
-nuevo_suelo = pd.DataFrame({"pH": [6.4], "Salinidad (dS/m)": [1.8]})
-prediccion_nueva = mejor_modelo.predict(nuevo_suelo)[0]
-print(
-    f"Predicción para suelo con pH 6.4 y CE 1.8 dS/m: {prediccion_nueva:.2f}"
-    " t/ha"
+evaluar_y_graficar(
+    y_biom, "Biomasa", "g/planta", "YlGn", "superficie_respuesta_biomasa.png"
 )
